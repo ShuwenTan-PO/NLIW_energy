@@ -1,6 +1,9 @@
 # Macbook files
 .DS_Store
 
+# raw data files
+data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
