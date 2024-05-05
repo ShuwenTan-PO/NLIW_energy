@@ -1,0 +1,26 @@
+name: NLIW
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - matplotlib>=3.1
+  - numpy>=1.23
+  - scipy>=1.2
+  - netcdf4
+  - pyproj>=2.3
+  - cartopy
+  - pip
+  - yaml
+  - ipython
+  - ipykernel
+  - cmocean
+  - jupyterlab
+  - jupyter
+  - pytest
+  - imageio
+  - mat73
+  - pip:
+      - findiff
+      - scikit-image
+      - xarray
+
