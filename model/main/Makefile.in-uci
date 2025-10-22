@@ -1,0 +1,35 @@
+#
+# File: Makefile.in
+# Author: Oliver B. Fringer
+# Institution: Stanford University
+# --------------------------------
+# Macros that must be specified before SUNTANS will compile correctly.
+# Here is an example:
+#
+# MPIHOME=/usr/local/mpich-1.2.7
+# PARMETISHOME=/usr/local/packages/ParMetis-2.0
+# TRIANGLEHOME=/usr/local/packages/triangle
+#
+# Note that this is for shell scripts as well as a Makefile,
+# so don't leave spaces between equal signs!
+#
+# Copyright (C) 2005-2006 The Board of Trustees of the Leland Stanford Junior 
+# University. All Rights Reserved.
+#
+MPIHOME=/opt/apps/mpich/4.0/intel/2022.2
+PARMETISHOME=/data/homezvol1/jrogers4/Libraries/ParMetis-3.2.0
+TRIANGLEHOME=/data/homezvol1/jrogers4/Libraries/triangle1.6
+NETCDF4HOME=/opt/apps/netcdf-c/4.8.1/intel/2022.2
+
+#gcc
+#MPIHOME=/opt/apps/mpich/3.4/gcc/8.4.0
+#PARMETISHOME=/data/homezvol1/jrogers4/Libraries/ParMetis-3.2.0
+#TRIANGLEHOME=/data/homezvol1/jrogers4/Libraries/triangle1.6
+#NETCDF4HOME=/opt/apps/netcdf-c/4.7.0/gcc/8.4.0
+#MPI_HOME=/opt/apps/mpich/4.0/gcc/11.2.0
+#NETCDF=/opt/apps/netcdf-c/4.8.1/gcc/11.2.0
+
+#MPIHOME=/home/jsrogers/mpich-install
+#PARMETISHOME=/home/jsrogers/ParMetis-3.2.0
+#TRIANGLEHOME=/home/jsrogers/triangle1.6
+#NETCDF4HOME=/usr/local/netcdf4
