@@ -1,0 +1,111 @@
+addpath(genpath('../../../Matlab/'))
+
+igrid = 1;
+idepth = 1;
+iprofile = 1;
+iinit_ic = 0;
+iinit_bc = 1;
+
+lambdaM2=70.1e3;
+% C = 1.57;
+D0=600;
+He = 313.1;
+datadir='../rundata';
+
+l_sponge = getvalue([datadir,'/suntans.dat'],'sponge_distance');
+INPUT.slope = 0.05;%300/4.5e3;%
+INPUT.width_he2 = 26000;%width at He/2
+INPUT.width_top = INPUT.width_he2 - 2*(He/2)/INPUT.slope; %width of top
+INPUT.r = INPUT.width_he2/2+(D0-He/2)/INPUT.slope;% radius of base
+INPUT.width_base = 2*INPUT.r; % width of base
+L=1.5*lambdaM2-INPUT.width_top-(INPUT.width_base-INPUT.width_top)/2;
+W=l_sponge/2;
+INPUT.x0 = L/2;
+INPUT.y0 = W/2;
+INPUT.z0 = -D0; % level of base
+INPUT.zmax = -4;
+%% 
+if iinit_bc   
+   n_soliton = 1;
+   bc_filename = '/sun_BC.nc';
+   soliton_file = 'soliton_file_summer_smallAPE.mat';
+%    bc_dt = getvalue([datadir,'/suntans.dat'],'dt')*10;  % ideal bc dt step [-1/24:1/24:4]*24*3600; % seconds since startime
+   bc_dt = getvalue([datadir,'/suntans.dat'],'bc_dt');  % ideal bc dt step [-1/24:1/24:4]*24*3600; % seconds since startime
+   soliton_interval = 0;
+   method_sponge = 1;
+   SUNTANS_boundary_conditions_soliton_short(n_soliton,datadir,...
+       bc_filename,bc_dt,soliton_file,soliton_interval,method_sponge);   
+%    SUNTANS_boundary_conditions_soliton_nopar_short_new(n_soliton,datadir,...
+%        bc_filename,bc_dt,soliton_file,soliton_interval,method_sponge);   
+%    SUNTANS_boundary_conditions_rogers(bc_ideal,datadir,...
+%        bc_filename,bc_dt);   
+end
+creating boundary condition files...
+Starting parallel pool (parpool) using the 'Processes' profile ...
+Connected to the parallel pool (number of workers: 8).
+computing outward normal vectors
+time window too small for low freq u, NTl<4, adjusted points
+writing netcdf BC file
+computing BC variables
+loading soliton data
+At time iteration 50...
+At time iteration 100...
+At time iteration 150...
+At time iteration 200...
+At time iteration 250...
+At time iteration 300...
+At time iteration 350...
+At time iteration 400...
+At time iteration 450...
+At time iteration 500...
+writing variables to netcdf BC file
+[Warning: Contour not rendered for
+constant ZData] 
+[> In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('contourf', '/Applications/MATLAB_R2022b.app/toolbox/matlab/specgraph/contourf.m', 60)" style="font-weight:bold">contourf</a> (<a href="matlab: opentoline('/Applications/MATLAB_R2022b.app/toolbox/matlab/specgraph/contourf.m',60,0)">line 60</a>)
+In <a href="matlab:matlab.internal.language.introspective.errorDocCallback('SUNTANS_boundary_conditions_soliton_short', '/Volumes/Tan_2024/SUNTANS/NLIW/iwave2024/Matlab/SUNTANS/mfiles/SUNTANS_boundary_conditions_soliton_short.m', 892)" style="font-weight:bold">SUNTANS_boundary_conditions_soliton_short</a> (<a href="matlab: opentoline('/Volumes/Tan_2024/SUNTANS/NLIW/iwave2024/Matlab/SUNTANS/mfiles/SUNTANS_boundary_conditions_soliton_short.m',892,0)">line 892</a>)] 
+close all
+open SUNTANS_depth_ideal
+subplot(2,1,1)
+plot(xv,-Depth,'.')
+{Unrecognized function or variable
+'xv'.
+} 
+load('SUNTANS_grid.mat')
+subplot(2,1,1)
+plot(xv,-Depth,'.')
+xlabel('x (m)')
+ylabel('z (m)')
+
+subplot(2,1,2)
+scatter(xv,yv,5,-Depth)
+cb=colorbar;
+colormap jet
+ylabel(cb,'z (m)')
+ylabel('y (m)')
+xlabel('x (m)')
+INPUT.way_point2
+
+ans =
+
+       42706
+
+max(xv)
+
+ans =
+
+   7.3372e+04
+
+7.3372e+04-INPUT.way_point2
+
+ans =
+
+       30666
+
+IdleTimeout has been reached.
+Parallel pool using the 'Processes' profile is shutting down.
+ 15551.81/3600
+
+ans =
+
+    4.3199
+

@@ -1,0 +1,781 @@
+/*
+* Terms in energy budget
+* -------------------
+* Calculate the energy conversion term following Kang (2010) 
+* 
+*/ 
+#include "energy.h"
+#include "initialization.h"
+#include "state.h"
+
+// Local function
+static void VelocityDecomposition(energyT *energy, gridT *grid, physT *phys);
+static void DensityDecomposition(energyT *energy, gridT *grid, physT *phys, propT *prop);
+static void PressureDecomposition(energyT *energy, gridT *grid, physT *phys, propT *prop);
+static void qGradient(energyT *energy, gridT *grid, physT *phys);
+static void KineticEnergy(energyT *energy, gridT *grid, physT *phys);
+static void PotentialEnergy(energyT *energy, gridT *grid, physT *phys, propT *prop);
+static void BarotropicW(gridT *grid, energyT *energy, physT *phys, propT *prop);
+static void swap(REAL xp, REAL yp);
+void printArray(REAL* arr, int size);
+
+
+/*
+ * Function: AllocateEnergyVariables()
+ * ------------------------------------
+ * Allocate memory to the energy variable arrays
+ *
+ */
+void AllocateEnergyVariables(gridT *grid, energyT **energy, propT *prop){
+  int i, k;
+  int Ntmp, Nkmax;
+
+  // allocate energy structure
+  *energy = (energyT *)SunMalloc(sizeof(energyT),"AllocateEnergyVariables");
+
+  // Allocate 2D arrays
+  (*energy)->Uc = (REAL *)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->Vc = (REAL *)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->depth = (REAL *)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->Ek0 = (REAL *)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->Ep0 = (REAL *)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  // Allocate 3D arrays
+  (*energy)->W = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->uc_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->vc_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->T_initial = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->S_initial = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->p_initial = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->rho_initial = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->rho_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->p0 = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->p_b = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->p_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->dqdz = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->Ek_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->Ek0_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  (*energy)->Ep_prime = (REAL **)SunMalloc(grid->Nc*sizeof(REAL *),"AllocateEnergyVariables");
+
+  // for each cell allocate memory for the number of layers at that location
+  for(i=0;i<grid->Nc;i++) {
+    (*energy)->W[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->uc_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->vc_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->T_initial[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->S_initial[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->p_initial[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->rho_initial[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->rho_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->p0[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->p_b[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->p_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->dqdz[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->Ek_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+    (*energy)->Ek0_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+
+    (*energy)->Ep_prime[i] = (REAL *)SunMalloc(grid->Nk[i]*sizeof(REAL),"AllocateEnergyVariables");
+  }
+
+  // for testinterp1()
+  Ntmp = 2;
+  Nkmax = 50;
+  (*energy)->xtmp = (REAL *)SunMalloc(Ntmp*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->ytmp = (REAL *)SunMalloc(Ntmp*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->xitmp = (REAL *)SunMalloc(Nkmax*sizeof(REAL *),"AllocateEnergyVariables");
+  (*energy)->yitmp = (REAL *)SunMalloc(Nkmax*sizeof(REAL *),"AllocateEnergyVariables");
+}
+
+
+/*
+ * Function: ZeroEnergyVariables() 
+ * ---------------------------------
+ * Zero the energy arrays
+ */
+void ZeroEnergyVariables(gridT *grid, energyT *energy, propT *prop ,MPI_Comm comm){
+  int i,k;
+  int Ntmp, Nkmax;
+
+  for(i=0;i<grid->Nc;i++) {
+    energy->Uc[i]=0;
+    energy->Vc[i]=0;
+    energy->depth[i]=0;
+    energy->Ek0[i]=0;
+    energy->Ep0[i]=0;
+    for(k=0;k<grid->Nk[i];k++) {
+      energy->W[i][k] = 0;
+      energy->uc_prime[i][k] = 0;
+      energy->vc_prime[i][k] = 0;
+      energy->T_initial[i][k] = 0;
+      energy->S_initial[i][k] = 0;
+      energy->p_initial[i][k] = 0;
+      energy->rho_initial[i][k] = 0;
+      energy->rho_prime[i][k] = 0;
+      energy->p0[i][k] = 0;
+      energy->p_b[i][k] = 0;
+      energy->p_prime[i][k] = 0;
+      energy->dqdz[i][k] = 0;
+      energy->Ek_prime[i][k] = 0;
+      energy->Ek0_prime[i][k] = 0;
+      energy->Ep_prime[i][k] = 0;
+    }
+  }
+
+  // for testinterp1()
+  Ntmp = 2;
+  Nkmax = 50;
+  for(k=0;k<Ntmp;k++) {
+    energy->xtmp[k]=0;
+    energy->ytmp[k]=0;
+  }
+  for(k=0;k<Nkmax;k++) {
+    energy->xitmp[k]=0;
+    energy->yitmp[k]=0;
+  }
+
+}
+
+
+/*
+ * Function: FreeEnergyVariables()
+ * ---------------------------------------------
+ * This function frees all space allocated in AllocateEnergyVariables
+ *
+ */
+void FreeEnergyVariables(gridT *grid, energyT *energy, propT *prop){
+  int i;
+
+  // free all the arrays over depth for cell-oriented
+  for(i=0;i<grid->Nc;i++) {
+    free(energy->W[i]);
+    free(energy->uc_prime[i]);
+    free(energy->vc_prime[i]);
+    free(energy->T_initial[i]);
+    free(energy->S_initial[i]);
+    free(energy->p_initial[i]);
+    free(energy->rho_initial[i]);
+    free(energy->rho_prime[i]);
+    free(energy->p0[i]);
+    free(energy->p_b[i]);
+    free(energy->p_prime[i]);
+    free(energy->dqdz[i]);
+    free(energy->Ek_prime[i]);
+    free(energy->Ek0_prime[i]);
+    free(energy->Ep_prime[i]);
+  }
+  free(energy->Uc);
+  free(energy->Vc);
+  free(energy->depth);
+  free(energy->Ek0);
+  free(energy->Ep0);
+  free(energy->W);
+  free(energy->uc_prime);
+  free(energy->vc_prime);
+  free(energy->T_initial);
+  free(energy->S_initial);
+  free(energy->p_initial);
+  free(energy->rho_initial);
+  free(energy->rho_prime);
+  free(energy->p0);
+  free(energy->p_b);
+  free(energy->p_prime);
+  free(energy->dqdz);  
+  free(energy->Ek_prime);
+  free(energy->Ek0_prime);
+  free(energy->Ep_prime);
+
+  free(energy);
+}
+
+
+/*
+ * Function: VelocityDecomposition()
+ * ---------------------------------
+ * Computes the barotropic and baroclinic velocities Uc, Vc and uc_prime, vc_prime
+ *
+ * Note: The integration for U and V calculation did not include eta, need to fix this! (S.Tan, 05/03/2023) 
+ -- dzz include eta, so fixed when integrate from k=0 (dzz[0,:,2750]+eta[1,2750]=dzz[1,:,2750])
+ */
+static void VelocityDecomposition(energyT *energy, gridT *grid, physT *phys){
+  int i, k;
+  REAL ddz, Udz, Vdz;
+
+    for(i=0;i<grid->Nc;i++) {
+      ddz = 0;
+      Udz = 0;
+      Vdz = 0;
+      for(k=0;k<grid->Nk[i];k++){
+        ddz += grid->dzz[i][k];
+        Udz += phys->uc[i][k]*grid->dzz[i][k];
+        Vdz += phys->vc[i][k]*grid->dzz[i][k];
+      }
+      energy->depth[i] = ddz;
+      energy->Uc[i] = Udz/ddz;
+      energy->Vc[i] = Vdz/ddz;
+    }
+
+    for(i=0;i<grid->Nc;i++) {
+      for(k=0;k<grid->Nk[i];k++){//for(k=0;k<grid->Nk[i]+1;k++){
+        energy->uc_prime[i][k] = phys->uc[i][k]-energy->Uc[i];
+        energy->vc_prime[i][k] = phys->vc[i][k]-energy->Vc[i];
+      }
+    }
+ 
+}
+
+
+/*
+ * Function: DensityDecomposition()
+ * ---------------------------------
+ * Decompose density rho(x,y,z,t): total density into
+- rho0: constant reference density
+- rho_b(z): background density
+- rho_prime(x,y,z,t): deviation, may be interpreted as perturbation density due to wave motions
+ *
+ */
+static void DensityDecomposition(energyT *energy, gridT *grid, physT *phys, propT *prop){
+  int i, k;
+  REAL z;
+
+  for(i=0;i<grid->Nc;i++) {
+      z = 0;
+      for(k=0;k<grid->Nk[i];k++) {
+        z-=grid->dz[k]/2;
+        energy->T_initial[i][k]=ReturnTemperature(grid->xv[i],grid->yv[i],z,grid->dv[i]);
+        energy->S_initial[i][k]=ReturnSalinity(grid->xv[i],grid->yv[i],z,prop);
+        energy->p_initial[i][k]=RHO0*prop->grav*z;
+        z-=grid->dz[k]/2;
+      }
+  }
+
+  for(i=0;i<grid->Nc;i++) {
+    // for(k=grid->ctop[i];k<grid->Nk[i];k++) {
+    for(k=0;k<grid->Nk[i];k++){
+      // initial density
+      energy->rho_initial[i][k]=StateEquation(prop,energy->S_initial[i][k],energy->T_initial[i][k],energy->p_initial[i][k]);
+      // compute pertubation density rho_prime by extracting phys->rho with initial density
+      energy->rho_prime[i][k]=phys->rho[i][k]-energy->rho_initial[i][k];
+    }
+  }
+
+}
+
+
+/*
+ * Function: PressureDecomposition()
+ * ---------------------------------
+ * Decompose pressure p: total pressure into p = ph + q: hydrostatic and non-hydrostatic pressures 
+- ph: total hydrostatic pressure
+- p0: constant reference pressure
+- p_b: background pressure
+- p_prime: deviation
+ *
+ * Note: The integration for p_b and p_prime calculation did not include eta, need to fix this! (S.Tan, 05/03/2023)
+ */
+static void PressureDecomposition(energyT *energy, gridT *grid, physT *phys, propT *prop){
+  int i, k;
+  REAL z;
+
+  for(i=0;i<grid->Nc;i++) {
+    z = 0;
+    for(k=0;k<grid->Nk[i];k++) {
+      z-=grid->dz[k]/2;
+      energy->p0[i][k]=RHO0*prop->grav*(phys->h[i]-z);
+      if(k==0){
+        energy->p_b[i][k]=RHO0*energy->rho_initial[i][k]*prop->grav*(grid->dz[k]+phys->h[i])/2;
+        energy->p_prime[i][k]=RHO0*energy->rho_prime[i][k]*prop->grav*(grid->dz[k]+phys->h[i])/2;
+      } else {
+        energy->p_b[i][k]=energy->p_b[i][k-1]+RHO0*energy->rho_initial[i][k-1]*prop->grav*grid->dzz[i][k-1]/2+RHO0*energy->rho_initial[i][k]*prop->grav*grid->dzz[i][k]/2;
+        energy->p_prime[i][k]=energy->p_prime[i][k-1]+RHO0*energy->rho_prime[i][k-1]*prop->grav*grid->dzz[i][k-1]/2+RHO0*energy->rho_prime[i][k]*prop->grav*grid->dzz[i][k]/2;
+      }
+      z-=grid->dz[k]/2;
+    }
+  }
+
+}
+
+
+/*
+ * Function: qGradient()
+ * ---------------------------------
+ * Compute vertical gradient for q: dqdz
+ * 
+ */
+static void qGradient(energyT *energy, gridT *grid, physT *phys){
+  int i, k;
+
+  // compute dq/dz, store gradients at same location of W: top and bottom of each cell
+  for(i=0;i<grid->Nc;i++) {
+    for(k=1;k<grid->Nk[i];k++) {
+      energy->dqdz[i][k]=2.0*(phys->q[i][k-1]-phys->q[i][k])/(grid->dzz[i][k-1]+grid->dzz[i][k]);
+    }
+    energy->dqdz[i][0]=energy->dqdz[i][1];
+    // energy->dqdz[i][grid->ctop[i]]=energy->dqdz[i][grid->ctop[i]+1];
+    // energy->dqdz[i][grid->Nk[i]]=energy->dqdz[i][grid->Nk[i]-1];
+  }
+ 
+}
+
+
+/*
+ * Function: KineticEnergy()
+ * ---------------------------------
+ * Computes the barotropic and baroclinic kinetic energy Ek0, Ek_prime, and cross term Ek0_prime
+ * 
+ */
+static void KineticEnergy(energyT *energy, gridT *grid, physT *phys) {
+  int i, k;
+
+  for(i=0;i<grid->Nc;i++) {
+    energy->Ek0[i]=RHO0*(pow(energy->Uc[i],2)+pow(energy->Vc[i],2))/2;
+    for(k=0;k<grid->Nk[i];k++){
+      energy->Ek_prime[i][k]=RHO0*(pow(energy->uc_prime[i][k],2)+pow(energy->vc_prime[i][k],2)+pow(phys->w[i][k],2))/2;
+      energy->Ek0_prime[i][k]=RHO0*(energy->Uc[i]*energy->uc_prime[i][k]+energy->Vc[i]*energy->vc_prime[i][k])/2;
+    }
+  }     
+ 
+}
+
+// https://www.geeksforgeeks.org/c-program-to-sort-an-array-in-ascending-order/
+// C program to sort the array in an
+// ascending order using selection sort
+static void swap(REAL xp, REAL yp)
+{
+    REAL temp = xp;
+    xp = yp;
+    yp = temp;
+}
+
+
+// Function to perform Selection Sort
+static void selectionSort(REAL* arr, int n)
+{
+    int i, j, min_idx;
+    REAL temp1, temp2;
+  
+    // One by one move boundary of
+    // unsorted subarray
+    for (i = 0; i < n - 1; i++) {
+        // Find the minimum element in
+        // unsorted array
+        min_idx = i;
+        for (j = i + 1; j < n; j++){
+          if (arr[j] < arr[min_idx]){
+            min_idx = j;
+          }
+        }
+  
+        // Swap the found minimum element
+        // with the first element
+        temp1 = arr[min_idx];
+        temp2 = arr[i];
+        arr[min_idx] = temp2;
+        arr[i] = temp1;
+    }
+}
+
+
+/*
+ * Function: PotentialEnergy()
+ * ---------------------------------
+ * Computes the perturbation potential energy due to surface elevation Ep0, available potential energy (APE) Ep_prime
+ *
+ * Note: the current Ep_prime is the triangle (APE3) instead of arc-triange (APE2) in Kang et al. (2010) (S.Tan somewhere spring, 2023)
+ */
+static void PotentialEnergy(energyT *energy, gridT *grid, physT *phys, propT *prop) {
+  int i, j, k, min_idx;
+  REAL *z_r, *z_star, *rho_perturb, temp;
+
+  z_r = (REAL *)SunMalloc((grid->Nkmax)*sizeof(REAL),"ComputeZ");
+  z_star = (REAL *)SunMalloc((grid->Nkmax)*sizeof(REAL),"ComputeZ");
+  rho_perturb = (REAL *)SunMalloc((grid->Nkmax)*sizeof(REAL),"ComputeZ");
+
+  for(k=0;k<grid->Nkmax;k++){
+    if(k==0){
+      z_r[k] = -grid->dz[k]*0.5;
+    }else{
+      z_r[k] = z_r[k-1]-grid->dz[k];
+    }
+  }
+
+  for(i=0;i<grid->Nc;i++) {
+    energy->Ep0[i]=RHO0*prop->grav*pow(phys->h[i],2)/2; // this is depth integrated value!!!
+    for(k=0;k<grid->Nk[i];k++){
+      rho_perturb[k]=(energy->rho_initial[i][k]+energy->rho_prime[i][k]);
+      z_star[k] = 0;
+    }
+    
+    // selectionSort(rho_perturb, grid->Nkmax);
+    // sort rho_b + rho_prime
+    
+    for(k=0;k<grid->Nk[i]-1;k++){
+      // Find the minimum element in unsorted array
+      min_idx = k;
+      for (j=k+1;j<grid->Nk[i];j++){
+        if (rho_perturb[j]<rho_perturb[min_idx]){
+          min_idx = j;
+        }
+      }
+      // Swap the found minimum element with the first element
+      temp = rho_perturb[min_idx];
+      rho_perturb[min_idx]=rho_perturb[k];
+      rho_perturb[k]=temp;
+    }
+
+    interp1(energy->rho_initial[0], z_r, grid->Nkmax, rho_perturb, z_star, grid->Nk[i]);
+    for(k=0;k<grid->Nk[i];k++){
+      if(IsNan(energy->rho_prime[i][k])){
+        z_star[k]=energy->rho_prime[i][k];
+      }
+    }
+
+    for(k=0;k<grid->Nk[i];k++){
+      energy->Ep_prime[i][k]=RHO0*prop->grav*(rho_perturb[k]-energy->rho_initial[i][k])*(z_r[k]-z_star[k])/2;
+    }
+  }     
+ 
+}
+
+
+/*
+ * Function: BarotropicW()
+ * -----------------------------------------------------------------------------------------------
+ * Computes the barotropic W following (7) in Kang and Fringer (2012)
+ *
+ */
+ static void BarotropicW(gridT *grid, energyT *energy, physT *phys, propT *prop) {
+  int i, iptr, k, nf, ne;
+  REAL UH_face, depth_face, height_face;
+
+  for(iptr=grid->celldist[0];iptr<grid->celldist[1];iptr++) {
+    i = grid->cellp[iptr];
+
+    for(k=0;k<grid->Nk[i]+1;k++){
+      energy->W[i][k] = 0;
+    }
+      
+    // for each face
+    for(nf=0;nf<grid->nfaces[i];nf++) {
+      // get the edge pointer
+      ne = grid->face[i*grid->maxfaces+nf];
+      
+      // compute total water depth for each face
+      depth_face = 0;
+      // compute integrated velocity for each face
+      UH_face = 0;
+      // for(k=grid->Nk[i]-1;k>=grid->ctop[i];k--) {
+      for(k=grid->Nk[i]-1;k>=0;k--) {
+        depth_face += grid->dzf[ne][k];
+        UH_face += phys->u[ne][k]*grid->dzf[ne][k];
+      }
+
+      // water colume height z+d for each face
+      height_face = 0;
+
+      // compute W from the horizontal divergence of barotropic horizontal velocities
+      // for(k=grid->Nk[i]-1;k>=grid->ctop[i];k--) {
+      for(k=grid->Nk[i]-1;k>=0;k--) {
+        height_face+=grid->dzf[ne][k]; 
+        if (height_face>0){
+          energy->W[i][k]-=height_face*UH_face*grid->df[ne]*grid->normal[i*grid->maxfaces+nf]/depth_face/grid->Ac[i];
+        }
+      }
+    }
+  }
+
+}
+
+
+/*
+ * Function: Conversion
+ * Usage: Conversion(phys->C1,phys->C2,phys->W,grid,phys,prop,comm,myproc);
+ * -----------------------------------------------------------------------------------------------
+ * Computes the conversion term C following (17) in Kang and Fringer (2012)
+ *
+ */
+void Conversion(REAL *C1, REAL *C2, gridT *grid, energyT *energy, physT *phys, propT *prop, MPI_Comm comm) {
+  int i, k;
+
+  DensityDecomposition(energy, grid, phys, prop);
+  qGradient(energy, grid, phys);
+  BarotropicW(grid, energy, phys, prop);
+
+  // compute depth integrated conversion term
+  for(i=0;i<grid->Nc;i++) {
+    C1[i] = 0;
+    C2[i] = 0;
+    // for(k=grid->ctop[i]+1;k<grid->Nk[i]+1;k++) {
+    for(k=0;k<grid->Nk[i];k++) {
+      C1[i]+=RHO0*energy->rho_prime[i][k]*energy->W[i][k]*prop->grav*grid->dzz[i][k]; 
+      C2[i]-=RHO0*energy->dqdz[i][k]*energy->W[i][k]*grid->dzz[i][k]; 
+    }
+  }
+
+}
+
+
+/*
+ * Function: EnergyFlux
+ * Usage: EnergyFlux(phys->C1,phys->C2,phys->W,grid,phys,prop,comm,myproc);
+ * -----------------------------------------------------------------------------------------------
+ * Computes the Energy Flux term F_0 and F_prime following (15) and (16) in Kang and Fringer (2012)
+ * Note that (see ../analysis/SUNTANS_island_energybudget.ipynb)
+ * 1) The integration for depth-integrated energy flux calculation did not include eta, need to fix this! (S.Tan, 05/03/2023)
+ * 2) TO UPDATE: Ek' does not include w (S.Tan, 05/03/2023)
+ *
+ */
+void EnergyFlux(REAL *Fx_0, REAL *Fy_0, REAL *Fx_prime, REAL *Fy_prime, gridT *grid, energyT *energy, physT *phys, propT *prop, MPI_Comm comm) {
+  int i, j, k;
+  REAL Fx_0_1, Fx_0_2, Fx_0_3, Fx_0_4;
+  REAL Fy_0_1, Fy_0_2, Fy_0_3, Fy_0_4;
+  REAL Fx_prime_1, Fx_prime_2, Fx_prime_3, Fx_prime_4, Fx_prime_5;
+  REAL Fy_prime_1, Fy_prime_2, Fy_prime_3, Fy_prime_4, Fy_prime_5;
+
+  VelocityDecomposition(energy, grid, phys);
+  KineticEnergy(energy, grid, phys);
+  DensityDecomposition(energy, grid, phys, prop);
+  PotentialEnergy(energy, grid, phys, prop);
+  PressureDecomposition(energy, grid, phys, prop);
+
+  // barotropic terms
+  for(i=0;i<grid->Nc;i++) {
+    Fx_0_1 = 0; 
+    Fx_0_2 = RHO0*prop->grav*energy->Uc[i]*energy->depth[i]*phys->h[i];
+    Fx_0_3 = 0; 
+    Fx_0_4 = 0; 
+    Fy_0_1 = 0; 
+    Fy_0_2 = RHO0*prop->grav*energy->Vc[i]*energy->depth[i]*phys->h[i];
+    Fy_0_3 = 0; 
+    Fy_0_4 = 0; 
+    // for(k=grid->ctop[i];k<grid->Nk[i];k++) {
+    for(k=0;k<grid->Nk[i];k++) {
+      Fx_0_1+=energy->Ek0[i]*grid->dzz[i][k]; 
+      Fx_0_3+=energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fx_0_4+=RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+      Fy_0_1+=energy->Ek0[i]*grid->dzz[i][k]; 
+      Fy_0_3+=energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fy_0_4+=RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+    }
+   Fx_0_1*=energy->Uc[i];
+   Fx_0_3*=energy->Uc[i];
+   Fx_0_4*=energy->Uc[i];
+   Fy_0_1*=energy->Vc[i];
+   Fy_0_3*=energy->Vc[i];
+   Fy_0_4*=energy->Vc[i];
+
+   Fx_0[i] = Fx_0_1+Fx_0_2+Fx_0_3+Fx_0_4;
+   Fy_0[i] = Fy_0_1+Fy_0_2+Fy_0_3+Fy_0_4;
+  }
+
+  // baroclinic terms
+  for(i=0;i<grid->Nc;i++) {
+    Fx_prime_1 = 0;
+    Fx_prime_2 = 0; 
+    Fx_prime_3 = 0; 
+    Fx_prime_4 = 0; 
+    Fx_prime_5 = 0;
+    Fy_prime_1 = 0;
+    Fy_prime_2 = 0; 
+    Fy_prime_3 = 0; 
+    Fy_prime_4 = 0; 
+    Fy_prime_5 = 0;
+    for(k=0;k<grid->Nk[i];k++) {
+      Fx_prime_1+=phys->uc[i][k]*energy->Ek_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_2+=phys->uc[i][k]*energy->Ek0_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_3+=phys->uc[i][k]*energy->Ep_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_4+=energy->uc_prime[i][k]*energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_5+=energy->uc_prime[i][k]*RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+      Fy_prime_1+=phys->vc[i][k]*energy->Ek_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_2+=phys->vc[i][k]*energy->Ek0_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_3+=phys->vc[i][k]*energy->Ep_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_4+=energy->vc_prime[i][k]*energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_5+=energy->vc_prime[i][k]*RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+    }
+   Fx_prime[i] = Fx_prime_1+Fx_prime_2+Fx_prime_3+Fx_prime_4+Fx_prime_5;
+   Fy_prime[i] = Fy_prime_1+Fy_prime_2+Fy_prime_3+Fy_prime_4+Fy_prime_5;
+  }
+
+}
+
+
+/*
+ * Function: EnergyFluxDecompose
+ * Usage: EnergyFluxDecompose(phys->C1,phys->C2,phys->W,grid,phys,prop,comm,myproc);
+ * -----------------------------------------------------------------------------------------------
+ * Computes the Energy Flux term F_0 and F_prime following (15) and (16) in Kang and Fringer (2012)
+ * Note that (see ../analysis/SUNTANS_island_energybudget.ipynb)
+ * 1) The integration for depth-integrated energy flux calculation did not include eta, need to fix this! (S.Tan, 05/03/2023)
+ * 2) TO UPDATE: Ek' does not include w (S.Tan, 05/03/2023)
+ *
+ */
+void EnergyFluxDecompose(REAL *Fx_01, REAL *Fx_02, REAL *Fx_03, REAL *Fx_04, REAL *Fy_01, REAL *Fy_02, REAL *Fy_03, REAL *Fy_04, REAL *Fx_prime1, REAL *Fx_prime2, REAL *Fx_prime3, REAL *Fx_prime4, REAL *Fx_prime5, REAL *Fy_prime1, REAL *Fy_prime2, REAL *Fy_prime3, REAL *Fy_prime4, REAL *Fy_prime5, gridT *grid, energyT *energy, physT *phys, propT *prop, MPI_Comm comm) {
+  int i, j, k;
+  REAL Fx_0_1, Fx_0_2, Fx_0_3, Fx_0_4;
+  REAL Fy_0_1, Fy_0_2, Fy_0_3, Fy_0_4;
+  REAL Fx_prime_1, Fx_prime_2, Fx_prime_3, Fx_prime_4, Fx_prime_5;
+  REAL Fy_prime_1, Fy_prime_2, Fy_prime_3, Fy_prime_4, Fy_prime_5;
+
+  VelocityDecomposition(energy, grid, phys);
+  KineticEnergy(energy, grid, phys);
+  DensityDecomposition(energy, grid, phys, prop);
+  PotentialEnergy(energy, grid, phys, prop);
+  PressureDecomposition(energy, grid, phys, prop);
+
+  // barotropic terms
+  for(i=0;i<grid->Nc;i++) {
+    Fx_0_1 = 0; 
+    Fx_0_2 = RHO0*prop->grav*energy->Uc[i]*energy->depth[i]*phys->h[i];
+    Fx_0_3 = 0; 
+    Fx_0_4 = 0; 
+    Fy_0_1 = 0; 
+    Fy_0_2 = RHO0*prop->grav*energy->Vc[i]*energy->depth[i]*phys->h[i];
+    Fy_0_3 = 0; 
+    Fy_0_4 = 0; 
+    // for(k=grid->ctop[i];k<grid->Nk[i];k++) {
+    for(k=0;k<grid->Nk[i];k++) {
+      Fx_0_1+=energy->Ek0[i]*grid->dzz[i][k]; 
+      Fx_0_3+=energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fx_0_4+=RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+      Fy_0_1+=energy->Ek0[i]*grid->dzz[i][k]; 
+      Fy_0_3+=energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fy_0_4+=RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+    }
+   Fx_0_1*=energy->Uc[i];
+   Fx_0_3*=energy->Uc[i];
+   Fx_0_4*=energy->Uc[i];
+   Fy_0_1*=energy->Vc[i];
+   Fy_0_3*=energy->Vc[i];
+   Fy_0_4*=energy->Vc[i];
+
+   Fx_01[i] = Fx_0_1;
+   Fx_02[i] = Fx_0_2; 
+   Fx_03[i] = Fx_0_3;
+   Fx_04[i] = Fx_0_4; 
+   Fy_01[i] = Fy_0_1;
+   Fy_02[i] = Fy_0_2; 
+   Fy_03[i] = Fy_0_3;
+   Fy_04[i] = Fy_0_4; 
+  }
+
+  // baroclinic terms
+  for(i=0;i<grid->Nc;i++) {
+    Fx_prime_1 = 0;
+    Fx_prime_2 = 0; 
+    Fx_prime_3 = 0; 
+    Fx_prime_4 = 0; 
+    Fx_prime_5 = 0;
+    Fy_prime_1 = 0;
+    Fy_prime_2 = 0; 
+    Fy_prime_3 = 0; 
+    Fy_prime_4 = 0; 
+    Fy_prime_5 = 0;
+    for(k=0;k<grid->Nk[i];k++) {
+      Fx_prime_1+=phys->uc[i][k]*energy->Ek_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_2+=phys->uc[i][k]*energy->Ek0_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_3+=phys->uc[i][k]*energy->Ep_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_4+=energy->uc_prime[i][k]*energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fx_prime_5+=energy->uc_prime[i][k]*RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+      Fy_prime_1+=phys->vc[i][k]*energy->Ek_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_2+=phys->vc[i][k]*energy->Ek0_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_3+=phys->vc[i][k]*energy->Ep_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_4+=energy->vc_prime[i][k]*energy->p_prime[i][k]*grid->dzz[i][k]; 
+      Fy_prime_5+=energy->vc_prime[i][k]*RHO0*phys->q[i][k]*grid->dzz[i][k]; 
+    }
+   Fx_prime1[i] = Fx_prime_1;
+   Fx_prime2[i] = Fx_prime_2;
+   Fx_prime3[i] = Fx_prime_3;
+   Fx_prime4[i] = Fx_prime_4;
+   Fx_prime5[i] = Fx_prime_5;
+   Fy_prime1[i] = Fy_prime_1;
+   Fy_prime2[i] = Fy_prime_2;
+   Fy_prime3[i] = Fy_prime_3;
+   Fy_prime4[i] = Fy_prime_4;
+   Fy_prime5[i] = Fy_prime_5;
+  }
+
+}
+
+
+/*
+ * Function: EnergyDiff()
+ * ---------------------------------
+ * Compute depth-integrated Ek0, Ep0, Ek_prime, Ep_prime
+ */
+void EnergyDiff(energyT *energy, gridT *grid, physT *phys, propT *prop, MPI_Comm comm){
+  int i, k;
+  REAL E1, E2, E3, E4;
+
+  for(i=0;i<grid->Nc;i++) {
+    E1 = 0;
+    E2 = 0;
+    E3 = 0;
+    E4 = 0;
+    phys->dEk0[i] = 0;
+    phys->dEp0[i] = 0;
+    phys->dEk_prime[i] = 0;
+    phys->dEp_prime[i] = 0;
+    for(k=0;k<grid->Nk[i];k++) {
+      E1+=energy->Ek0[i]*grid->dzz[i][k]; 
+      E2+=energy->Ep0[i]*grid->dzz[i][k]; 
+      E3+=energy->Ek_prime[i][k]*grid->dzz[i][k]; 
+      E4+=energy->Ep_prime[i][k]*grid->dzz[i][k]; 
+    }
+    phys->dEk0[i] = E1;
+    phys->dEp0[i] = energy->Ep0[i]; // energy->Ep0 is already depth integration (Kang 2010 eq. 5.53)
+    phys->dEk_prime[i] = E3;
+    phys->dEp_prime[i] = E4;
+  }
+
+}
+
+
+/*
+ * Function: testinterp1()
+ * ---------------------------------
+ * this function is to test my interp1 in util.c, it works fine
+ */
+void testinterp1(REAL *xout, REAL *yout, energyT *energy, gridT *grid, physT *phys, propT *prop){
+  int i, j, k, Ntmp, Nkmax;
+
+  Ntmp = 2;
+  Nkmax = 50;
+
+  energy->xtmp[0]=-100;
+  energy->xtmp[1]=100;
+  energy->ytmp[0]=-10;
+  energy->ytmp[1]=10;
+
+  for(i=0;i<Nkmax;i++) {
+    energy->xitmp[i]=0;
+    energy->yitmp[i]=0;
+  }
+  for(i=1;i<Nkmax;i++) {
+    energy->xitmp[i]=-i;
+  }
+
+  interp1(energy->xtmp, energy->ytmp, Ntmp, energy->xitmp, energy->yitmp, Nkmax);
+
+  for(i=0;i<grid->Nc;i++) {
+    if(i<Nkmax){
+      xout[i]=energy->xitmp[i];
+      yout[i]=energy->yitmp[i];
+    }else{
+      xout[i]=0;
+      yout[i]=0;
+    }
+  }
+
+}

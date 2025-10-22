@@ -1,0 +1,520 @@
+function [PROF] = get_profile(dirname,rho0,gamma)
+%
+% Plot profiles of u(z,t) at the different stations specified in
+% ../rundata/dataxy.dat
+%
+% dirname = '../data';
+if nargin==1
+    rho0 = 1000.;
+    gamma =2.1e-4;
+end
+EMPTY = 999999;
+grav = 9.81;
+
+fname = [dirname,'/profdata.dat'];
+
+
+fid = fopen(fname,'rb');
+if fid==-1 % there is no file
+    PROF=[];
+    return
+else
+numTotalDataPoints = fread(fid,1,'int32');
+numInterpPoints = fread(fid,1,'int32');
+Nkmax = fread(fid,1,'int32');
+nsteps = fread(fid,1,'int32');
+ntoutProfs = fread(fid,1,'int32');  
+dt = fread(fid,1,'float64');
+dz = fread(fid,Nkmax,'float64');
+dataIndices = fread(fid,numTotalDataPoints,'int32');
+dataXY = fread(fid,2*numTotalDataPoints,'float64');
+xv = reshape(fread(fid,numInterpPoints*numTotalDataPoints,'float64'),numInterpPoints,numTotalDataPoints);
+yv = reshape(fread(fid,numInterpPoints*numTotalDataPoints,'float64'),numInterpPoints,numTotalDataPoints);
+fclose(fid);
+
+starttime = getvalue([dirname,'/suntans.dat'],'starttime');
+
+% load profile names
+dataNames = dir([dirname, '/dataxy_names.dat']);
+if ~isempty(dataNames) % file exists   
+dataNames = importdata([dirname, '/dataxy_names.dat']);
+end
+
+
+%%
+dataX = dataXY(1:2:end);
+dataY = dataXY(2:2:end);
+
+z = getz(dz);
+
+fname = [dirname,'/u.data.prof'];
+fid = fopen(fname,'rb');
+if fid==-1 % there is no file
+    PROF=[];
+    return
+else
+
+    data = fread(fid,'float64');
+    data(find(data==EMPTY))=nan;
+    fclose(fid);
+    
+if isempty(data)
+    PROF=[];
+    return
+end
+
+
+    nout = length(data)/(3*Nkmax*numInterpPoints*numTotalDataPoints);
+    udata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,3,nout);
+    udata = squeeze(udata);
+
+    Time = ones(Nkmax,1)*[1:nout]*dt*ntoutProfs; % s since start
+    mtime = Time/24/3600+datenum(sprintf('%.6f',starttime),'yyyymmdd.HHMMSS');
+
+    Z = z*ones(1,nout);
+    Tday = 86400;
+    
+    if Nkmax == 1 % only 1 layer
+        u(1,:,:) = squeeze(udata(:,1,:));
+        v(1,:,:) = squeeze(udata(:,2,:));
+        w(1,:,:) = squeeze(udata(:,3,:));
+    else
+        u = squeeze(udata(:,:,1,:));
+        v = squeeze(udata(:,:,2,:));
+        w = squeeze(udata(:,:,3,:));
+    end
+
+    for loc=1:size(u,2)
+      uplot{loc}(1:Nkmax,:) = squeeze(u(:,loc,:));
+      vplot{loc}(1:Nkmax,:) = squeeze(v(:,loc,:));
+      wplot{loc}(1:Nkmax,:) = squeeze(w(:,loc,:));
+      kmax{loc} = max(find(~isnan(uplot{loc}(:,1))));
+      % TODO: this is not the real depth
+      d0(loc) = sum(dz(1:kmax{loc}));
+      u0{loc} = sum((dz(1:kmax{loc})*ones(1,nout)).*uplot{loc}(1:kmax{loc},:))/d0(loc);
+      v0{loc} = sum((dz(1:kmax{loc})*ones(1,nout)).*vplot{loc}(1:kmax{loc},:))/d0(loc);
+      w0{loc} = sum((dz(1:kmax{loc})*ones(1,nout)).*wplot{loc}(1:kmax{loc},:))/d0(loc);
+    end
+    
+    for loc=1:size(u,2)
+        PROF.uplot{loc} = uplot{loc}(1:kmax{loc},:);
+        PROF.vplot{loc} = vplot{loc}(1:kmax{loc},:);
+        PROF.wplot{loc} = wplot{loc}(1:kmax{loc},:);
+        PROF.z{loc} = z(1:kmax{loc});
+        PROF.dz{loc} = dz(1:kmax{loc});
+    end
+    PROF.u0 = u0;
+    PROF.v0 = v0;
+    PROF.w0 = w0;
+    PROF.d0 = d0;
+%     PROF.dz = dz;
+    PROF.Time = Time(1,:);
+    PROF.mtime = mtime(1,:);
+    PROF.Tday = Tday;
+%     PROF.Z = Z;
+    PROF.dataX = dataX;
+    PROF.dataY = dataY;
+    PROF.dataNames=dataNames;
+    
+    %% get cut cell bottoms for pressure calc
+%     for loc=1:size(PROF.u0,2)
+%         kmax{loc} = length(PROF.z{loc});
+%         PROF.dz{loc} = dz(1:kmax{loc});
+%     end
+    for loc=1:size(PROF.u0,2)
+        dz = PROF.dz{loc};
+        z = getz(dz);
+        depth = PROF.d0(loc);
+        zb = z-dz/2;
+        zt = z+dz/2;
+        dZ_cut = zeros(size(dz)); % this was some bug in Justin's original code
+%         dZ_cut = nan+dz; % now fixed: below bottom grids are marked 0
+        % cells below depth 
+%         dZ_cut(i,:) = 0*z;
+
+        % cells fully open
+        indx = zb>=-depth;
+        dZ_cut(indx)= zt(indx)-zb(indx);
+        % cells partially closed
+        indx = zb<-depth & zt>-depth;
+        dZ_cut(indx)= zt(indx)+depth;
+
+        % create a constant dz, but masked
+        dZ_mask = dz;
+        dZ_mask(dZ_cut == 0) = 0;
+
+        PROF.dZ_cut{loc} = dZ_cut;
+        PROF.dZ_mask{loc} = dZ_mask;
+    end
+
+    %% other variables
+
+    % temperature
+    fname = [dirname,'/T.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.Tplot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        Tdata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,nout);
+        Tdata = squeeze(Tdata);
+        if Nkmax==1
+            Tdata = reshape(Tdata,Nkmax,numTotalDataPoints,[]);
+        else
+            Tdata = squeeze(Tdata);
+        end
+        for loc=1:size(Tdata,2)
+            if kmax{loc} > 1
+                PROF.Tplot{loc} = squeeze(Tdata(1:kmax{loc},loc,:));
+            else
+                PROF.Tplot{loc} = squeeze(Tdata(1:kmax{loc},loc,:))';
+            end
+        end
+    end
+
+    % salinity
+    fname = [dirname,'/s.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.Splot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        Sdata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,nout);
+        if Nkmax==1
+            Sdata = reshape(Sdata,Nkmax,numTotalDataPoints,[]);
+        else
+            Sdata = squeeze(Sdata);
+        end
+        for loc=1:size(Sdata,2)
+            if kmax{loc} > 1
+                PROF.Splot{loc} = squeeze(Sdata(1:kmax{loc},loc,:));
+            else
+                PROF.Splot{loc} = squeeze(Sdata(1:kmax{loc},loc,:))';
+            end
+        end
+    end
+
+    % nh pressure
+    fname = [dirname,'/q.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.qplot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        qdata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,nout);
+        if Nkmax==1
+            qdata = reshape(qdata,Nkmax,numTotalDataPoints,[]);
+        else
+            qdata = squeeze(qdata);
+        end
+        for loc=1:size(qdata,2)
+            if kmax{loc} > 1
+                PROF.qplot{loc} = squeeze(qdata(1:kmax{loc},loc,:));
+            else
+                PROF.qplot{loc} = squeeze(qdata(1:kmax{loc},loc,:))';
+            end
+        end
+    end
+
+    % free surface
+    fname = [dirname,'/fs.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.etaplot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        etadata = reshape(data,numInterpPoints,numTotalDataPoints,nout);
+        etadata = squeeze(etadata);
+        for loc=1:size(etadata,1)
+          PROF.etaplot{loc} = squeeze(etadata(loc,:));
+        end
+    end
+
+    % n eddy-viscosity
+    fname = [dirname,'/n.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.nplot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        ndata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,nout);
+        if Nkmax==1
+            ndata = reshape(ndata,Nkmax,numTotalDataPoints,[]);
+        else
+            ndata = squeeze(ndata);
+        end
+        for loc=1:size(ndata,2)
+            if kmax{loc} > 1
+                PROF.nplot{loc} = squeeze(ndata(1:kmax{loc},loc,:));
+            else
+                PROF.nplot{loc} = squeeze(ndata(1:kmax{loc},loc,:))';
+            end
+        end
+    end
+
+    % k scalar-diffusivity
+    fname = [dirname,'/k.data.prof'];
+    fid = fopen(fname,'rb');
+    if fid==-1 % there is no file
+        PROF.kplot=[];   
+    else
+        data = fread(fid,'float64');
+        data(find(data==EMPTY))=nan;
+        fclose(fid);
+        kdata = reshape(data,Nkmax,numInterpPoints,numTotalDataPoints,nout);
+        if Nkmax==1
+            kdata = reshape(kdata,Nkmax,numTotalDataPoints,[]);
+        else
+            kdata = squeeze(kdata);
+        end
+        for loc=1:size(kdata,2)
+            if kmax{loc} > 1
+                PROF.kplot{loc} = squeeze(kdata(1:kmax{loc},loc,:));
+            else
+                PROF.kplot{loc} = squeeze(kdata(1:kmax{loc},loc,:))';
+            end
+        end
+    end
+
+    %% compute density
+    if isfield(PROF,'Tplot')
+        time = PROF.Time;
+        for loc=1:size(PROF.Tplot,2)
+            PROF.rho{loc} = rho0.*(1 -gamma.*PROF.Tplot{loc});
+
+            % take rho background as avgerage distribution
+%             temp = squeeze(nanmean(PROF.rho{loc},2))-rho0;
+            z_grids = size(PROF.Tplot{loc});
+            z_grids = z_grids(2);
+            temp = squeeze(mean(PROF.rho{loc},2,'omitnan'))-rho0;
+
+            % rho_b read from nc file if exist! which is calculated from
+            % the spatial mean of the entire model domain - S.Tan, 05/03/2023
+            if isfile('./results/sun_out_energy.nc')
+                rho_b_ = ncread('./results/sun_out_energy.nc','rho_b');
+                rho_b{loc}=rho_b_(1:length(temp)).*ones(size(PROF.rho{loc}));
+            else
+                if z_grids > 1  
+                    [~, rho_b{loc}]=meshgrid(time, temp);
+                else
+                    rho_b{loc}=temp;
+                end
+            end
+
+            rho_prime{loc} = PROF.rho{loc} - rho0 - rho_b{loc};
+        end
+    end
+    PROF.rho0 = rho0;
+    PROF.rho_b = rho_b;
+    PROF.rho_prime = rho_prime;
+    
+    %% compute pressure
+%     % p = ph + q
+%     % hydrostatic and non-hydrostatic pressures 
+% 
+%     % ph = p0 + p_b(z) + p_prime(x,y,z,t)
+%     % reference, background, and deviation
+    nout = length(PROF.Time);
+    if isfield(PROF,'Tplot')
+        for loc=1:size(PROF.Tplot,2)
+            Nkmax = length(PROF.z{loc});
+            Z = PROF.z{loc}*ones(1,nout);
+            dz = PROF.dz{loc};
+            dZ_cut = PROF.dZ_cut{loc};
+            dZ_mask = PROF.dZ_mask{loc};
+            
+            % reference hydrostatic pressure p0
+            p0{loc} = rho0*grav*(PROF.etaplot{loc}-Z);
+            
+            % background pressure
+            p_b{loc} = zeros(Nkmax,nout);
+            p_b{loc}(1,:) = 0.5*rho_b{loc}(1,:).*grav.*(dZ_mask(1)+PROF.etaplot{loc}); % including the free surface in the pressure
+            %    here's a p_b calculation using cut cell dz values at the bottom
+            for k = 2:Nkmax
+                p_b{loc}(k,:) = p_b{loc}(k-1,:)+0.5*rho_b{loc}(k-1,:).*grav.*dZ_mask(k-1)+...
+                              0.5*rho_b{loc}(k,:).*grav.*dZ_mask(k);
+            end
+            
+            % deviation pressure
+            p_prime{loc} = zeros(Nkmax,nout);
+            p_prime{loc}(1,:) = 0.5*rho_prime{loc}(1,:).*grav.*(dZ_mask(1)+PROF.etaplot{loc}); % including the free surface in the pressure
+            %    here's a p_prime calculation using cut cell dz values at the bottom
+            for k = 2:Nkmax
+                p_prime{loc}(k,:) = p_prime{loc}(k-1,:)+0.5*rho_prime{loc}(k-1,:).*grav.*dZ_mask(k-1)+...
+                                   0.5*rho_prime{loc}(k,:).*grav.*dZ_mask(k);
+            end
+            
+            % nonhydrostatic pressure
+            % add nonhydrostatic pressure to p_prime
+            p_hyd{loc} = p0{loc} + p_b{loc} + p_prime{loc};
+            % p_nhyd = q;
+            p_nhyd{loc} = PROF.qplot{loc}.*rho0;
+            p{loc} = p_hyd{loc} + p_nhyd{loc};
+            
+            % find average background pressure in time
+%             PROF.p_bckgrnd{loc} = nanmean(p{loc},2);
+            PROF.p_bckgrnd{loc} = mean(p{loc},2,'omitnan');
+            % dynamic pressure is deviation from background
+            PROF.p_dynamic{loc} = p{loc} - PROF.p_bckgrnd{loc}*ones(1,nout);
+            
+            PROF.p0{loc} = p0{loc};
+            PROF.p_b{loc} = p_b{loc};
+            PROF.p_prime{loc} = p_prime{loc};
+            PROF.p_hyd{loc} = p_hyd{loc};
+            PROF.p_nhyd{loc} = p_nhyd{loc};
+
+        end
+    end
+
+    %% compute energy budget - depth integrated % S.Tan, UCI, 2023-02-14
+    % add potential energy calculations % S.Tan, UCI, 2023-05-02
+
+    if isfield(PROF,'Tplot')
+        for loc=1:size(PROF.Tplot,2)
+            Nkmax = length(PROF.z{loc});
+            Z = PROF.z{loc}*ones(1,nout);
+            dz = PROF.dz{loc};
+            dZ_cut = PROF.dZ_cut{loc};
+            depth = PROF.d0(loc);
+            u = PROF.uplot{loc};
+            v = PROF.vplot{loc};
+            eta = PROF.etaplot{loc};
+            rho_b = PROF.rho_b{loc};
+            rho_prime = PROF.rho_prime{loc};
+
+
+            % Barotropic currents
+            U = nansum(u.*dZ_cut,1)./nansum(dZ_cut);
+            V = nansum(v.*dZ_cut,1)./nansum(dZ_cut);
+            % Baroclinic currents
+            u_prime = u-U;
+            v_prime = v-V;
+            % Energy flux
+            Ek0 = 0.5*rho0*(U.^2+V.^2);
+            Ek_prime = 0.5*rho0*(u_prime.^2+v_prime.^2);
+            Ek0_prime = rho0*(U.*squeeze(u_prime)+V.*squeeze(v_prime));
+
+            % Kinetic energy
+            PROF.Ek0{loc} = nansum(Ek0.*dZ_cut,1);
+            PROF.Ek_prime{loc} = nansum(Ek_prime.*dZ_cut,1);
+            % Potential energy
+            PROF.Ep0{loc} = 0.5.*rho0.*grav.*squeeze(eta).^2;
+            Ep_prime = zeros(size(Z));
+            z_star = zeros(size(Z));
+            for i = 1:length(time)
+                if length(rho_b(:,i))>1
+                    z_star(:,i) = interp1(rho_b(:,i), Z(:,i), rho_b(:,i)+rho_prime(:,i)); % z at reference state
+                    Ep_prime(:,i) = 0.5.*rho_prime(:,i).*(z_star(:,i)-Z(:,i));
+                end
+            end
+            PROF.Ep_prime{loc} = nansum(Ep_prime.*dZ_cut,1);
+
+            % barotropic energy flux: 
+            % adv (advection), pw (pressure work), dif (diffusion)
+            Fx_0_adv = U.*nansum(Ek0.*dZ_cut,1); % note this is different from Rogers' code, I think mine is correct
+            Fx_0_pw1 = rho0.*grav.*U.*depth.*squeeze(eta);
+            Fx_0_pw2 = U.*nansum(p_prime{loc}.*dZ_cut,1);
+            Fx_0_pw3 = U.*nansum(p_nhyd{loc}.*dZ_cut,1);
+            Fx_0_dif = zeros(size(Fx_0_adv));
+            Fy_0_adv = V.*nansum(Ek0.*dZ_cut,1);
+            Fy_0_pw1 = rho0.*grav.*V.*depth.*squeeze(eta);
+            Fy_0_pw2 = V.*nansum(p_prime{loc}.*dZ_cut,1);
+            Fy_0_pw3 = V.*nansum(p_nhyd{loc}.*dZ_cut,1);
+            Fy_0_dif = zeros(size(Fy_0_adv));
+
+            Fx_0 = Fx_0_adv+...
+                   Fx_0_pw1+Fx_0_pw2+Fx_0_pw3+...
+                   Fx_0_dif;
+            Fy_0 = Fy_0_adv+...
+                   Fy_0_pw1+Fy_0_pw2+Fy_0_pw3+...
+                   Fy_0_dif;
+
+            % baroclinic energy flux
+            Fx_prime_adv1 = nansum(u.*Ek_prime.*dZ_cut,1);
+            Fx_prime_adv2 = nansum(u.*Ek0_prime.*dZ_cut,1);
+            Fx_prime_adv3 = nansum(u.*Ep_prime.*dZ_cut,1);
+            Fx_prime_pw1 = nansum(u_prime.*p_prime{loc}.*dZ_cut,1);
+            Fx_prime_pw2 = nansum(u_prime.*p_nhyd{loc}.*dZ_cut,1);
+            Fx_prime_dif1 = zeros(size(Fx_prime_adv1));
+            Fx_prime_dif2 = zeros(size(Fx_prime_adv1));
+            Fy_prime_adv1 = nansum(v.*Ek_prime.*dZ_cut,1);
+            Fy_prime_adv2 = nansum(v.*Ek0_prime.*dZ_cut,1);
+            Fy_prime_adv3 = nansum(v.*Ep_prime.*dZ_cut,1);
+            Fy_prime_pw1 = nansum(v_prime.*p_prime{loc}.*dZ_cut,1);
+            Fy_prime_pw2 = nansum(v_prime.*p_nhyd{loc}.*dZ_cut,1);
+            Fy_prime_dif1 = zeros(size(Fy_prime_adv1));
+            Fy_prime_dif2 = zeros(size(Fy_prime_adv1));
+
+            Fx_prime = Fx_prime_adv1+Fx_prime_adv2+Fx_prime_adv3+...
+                       Fx_prime_pw1+Fx_prime_pw2+...
+                       Fx_prime_dif1+Fx_prime_dif2;
+            Fy_prime = Fy_prime_adv1+Fy_prime_adv2+Fy_prime_adv3+...
+                       Fy_prime_pw1+Fy_prime_pw2+...
+                       Fy_prime_dif1+Fy_prime_dif2;
+
+            PROF.Fx_0{loc} = Fx_0;
+            PROF.Fy_0{loc} = Fy_0;
+            PROF.Fx_prime{loc} = Fx_prime;
+            PROF.Fy_prime{loc} = Fy_prime;
+
+            PROF.U{loc} = U;
+            PROF.V{loc} = V;
+
+%             PROF.Fx_0_adv{loc} = Fx_0_adv;
+%             PROF.Fx_0_pw1{loc} = Fx_0_pw1;
+%             PROF.Fx_0_pw2{loc} = Fx_0_pw2;
+%             PROF.Fx_0_pw3{loc} = Fx_0_pw3;
+%             PROF.Fy_0_adv{loc} = Fy_0_adv;
+%             PROF.Fy_0_pw1{loc} = Fy_0_pw1;
+%             PROF.Fy_0_pw2{loc} = Fy_0_pw2;
+%             PROF.Fy_0_pw3{loc} = Fy_0_pw3;
+%             PROF.Fx_prime_adv1{loc} = Fx_prime_adv1;
+%             PROF.Fx_prime_adv2{loc} = Fx_prime_adv2;
+%             PROF.Fx_prime_adv3{loc} = Fx_prime_adv3;
+%             PROF.Fx_prime_pw1{loc} = Fx_prime_pw1;
+%             PROF.Fx_prime_pw2{loc} = Fx_prime_pw2;
+%             PROF.Fy_prime_adv1{loc} = Fy_prime_adv1;
+%             PROF.Fy_prime_adv2{loc} = Fy_prime_adv2;
+%             PROF.Fy_prime_adv3{loc} = Fy_prime_adv3;
+%             PROF.Fy_prime_pw1{loc} = Fy_prime_pw1;
+%             PROF.Fy_prime_pw2{loc} = Fy_prime_pw2;
+        end
+    end
+
+    end
+
+end
+    %%
+    % figure(1);
+    % for loc=1:3
+    %   
+    %   uplot = squeeze(u(:,loc,:));
+    %   kmax = max(find(~isnan(uplot(:,1))));
+    %   d0 = sum(dz(1:kmax));
+    %   u0 = sum((dz(1:kmax)*ones(1,nout)).*uplot(1:kmax,:))/d0;
+    %   
+    %   subplot(3,1,loc)
+    %   pcolor(Time/Tday,Z,uplot-ones(Nkmax,1)*u0);
+    %   title(sprintf('Baroclinic u(z,t) at Location %d (x = %.0f km)',loc,dataX(loc)/1000));
+    %   shading flat;
+    %   axis([0 max(Time(1,:)/Tday) -d0 0]);
+    %   colorbar;
+    %   
+    %   if(loc==3) 
+    %     xlabel('Time (days)'); 
+    %   else
+    %     set(gca,'xticklabel','');
+    %   end
+    %   ylabel('Depth (m)');
+    % end
+end
