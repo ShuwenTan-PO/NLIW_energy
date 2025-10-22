@@ -3,6 +3,10 @@
 
 # raw data files
 data/
+<<<<<<< HEAD
+=======
+model/
+>>>>>>> a3aa3e1079db3b01a19d1a9ae70aee4a0354e6a5
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
